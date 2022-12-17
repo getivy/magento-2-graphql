@@ -1,0 +1,20 @@
+# Copyright © Magento, Inc. All rights reserved.
+# See COPYING.txt for license details.
+
+type Mutation {
+    createIvyCheckoutSession(
+        input: CreateIvyCheckoutSessionInput! @doc(description: "An input object that defines the cart object.")
+    ): CreateIvyCheckoutSessionOutput
+    @resolver(class: "Esparksinc\\IvyPaymentGraphql\\Model\\Resolver\\CreateCheckoutSession")
+    @doc(description: "Create checkout session for further processing an order with the Ivy payment service.")
+}
+
+input CreateIvyCheckoutSessionInput @doc(description: "Identities to create an Ivy checkout session.") {
+    cartId: String! @doc(description: "The unique ID of a `Cart` object.")
+    express: Boolean! @doc(description: "Express Checkout Flag.")
+}
+
+type CreateIvyCheckoutSessionOutput @doc(description: "Contains the Ivy payment redirect info.") {
+    redirectUrl: String @doc(description: "The Ivy payment redirect url.")
+    errorMessage: String @doc(description: "The Ivy payment error message.")
+}
