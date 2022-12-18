@@ -13,8 +13,7 @@ You can install this modile simply with composer. [Here](https://packagist.org/p
 
 ```bash
 composer require getivy/magento-2-graphql
+php bin/magento setup:upgrade
 php bin/magento module:enable Esparksinc_IvyPaymentGraphql
 php bin/magento setup:di:compile
 ```
-
-There is no need to run `setup:upgrade` because this module does not require a database upgrade.
