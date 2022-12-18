@@ -10,7 +10,8 @@
     "minimum-stability": "dev",
     "require": {
         "php": "~7.3.0||~7.4.0||~8.1.0",
-        "magento/framework": "*"
+        "magento/framework": "*",
+        "getivy/magento-2": "*"
     },
     "autoload": {
         "files": [
