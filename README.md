@@ -9,7 +9,7 @@ Magento 2.4.x
 
 ### Installation
 
-You can install this modile simply with composer.
+You can install this module simply with composer.
 ```bash
 composer config repositories.getivy/magento-2-graphql git git@github.com:getivy/magento-2-graphql.git
 composer require getivy/magento-2-graphql
