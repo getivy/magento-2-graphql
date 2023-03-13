@@ -75,10 +75,10 @@ class CreateCheckoutSession
     /**
      * @param Quote $quote
      * @param bool $express
-     * @return ResponseInterface
+     * @return array
      * @throws \GuzzleHttp\Exception\GuzzleException
      */
-    public function execute(Quote $quote, bool $express = false): ResponseInterface
+    public function execute(Quote $quote, bool $express = false): array
     {
         $ivyModel = $this->ivy->create();
 

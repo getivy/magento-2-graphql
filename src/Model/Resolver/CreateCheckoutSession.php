@@ -13,7 +13,6 @@ use Magento\Framework\GraphQl\Exception\GraphQlInputException;
 use Magento\Framework\GraphQl\Exception\GraphQlNoSuchEntityException;
 use Magento\Framework\GraphQl\Query\ResolverInterface;
 use Magento\Framework\GraphQl\Schema\Type\ResolveInfo;
-use Magento\Framework\Serialize\Serializer\Json;
 use Magento\QuoteGraphQl\Model\Cart\GetCartForUser;
 
 /**
@@ -33,19 +32,12 @@ class CreateCheckoutSession implements ResolverInterface
      */
     private $createCheckoutSessionApi;
 
-    /**
-     * @var Json
-     */
-    private $json;
-
     public function __construct(
         CreateCheckoutSessionApi $createCheckoutSessionApi,
-        GetCartForUser $getCartForUser,
-        Json $json
+        GetCartForUser $getCartForUser
     ) {
         $this->createCheckoutSessionApi = $createCheckoutSessionApi;
         $this->getCartForUser = $getCartForUser;
-        $this->json = $json;
     }
 
     /**
@@ -75,11 +67,8 @@ class CreateCheckoutSession implements ResolverInterface
         try {
             $cart = $this->getCartForUser->execute($maskedCartId, $context->getUserId(), $storeId);
 
-            $response = $this->createCheckoutSessionApi->execute($cart, $isExpress);
-            if ($response->getStatusCode() === 200) {
-                $arrData = $this->json->unserialize((string)$response->getBody());
-                $redirectUrl = $arrData['redirectUrl'];
-            }
+            $responseData = $this->createCheckoutSessionApi->execute($cart, $isExpress);
+            $redirectUrl = $responseData['redirectUrl'] ?? '';
         } catch (GraphQlNoSuchEntityException
                 |GraphQlAuthorizationException
                 |NoSuchEntityException
