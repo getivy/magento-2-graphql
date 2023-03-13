@@ -4,18 +4,19 @@ declare(strict_types=1);
 
 namespace Esparksinc\IvyPaymentGraphql\Model\Api;
 
-use Esparksinc\IvyPayment\Helper\Api as ApiHelper;
 use Esparksinc\IvyPayment\Helper\Discount as DiscountHelper;
 use Esparksinc\IvyPayment\Model\Config;
-use Esparksinc\IvyPayment\Model\Logger;
 use Esparksinc\IvyPayment\Model\ErrorResolver;
 use Esparksinc\IvyPayment\Model\IvyFactory;
+use Esparksinc\IvyPaymentGraphql\Helper\Api as ApiHelper;
+use Esparksinc\IvyPaymentGraphql\Model\Logger;
 use Magento\Framework\App\Config\ScopeConfigInterface;
 use Magento\Framework\Controller\Result\JsonFactory;
 use Magento\Framework\Controller\Result\RedirectFactory;
 use Magento\Quote\Api\CartRepositoryInterface;
 use Magento\Quote\Model\Cart\CartTotalRepository;
 use Magento\Theme\Block\Html\Header\Logo;
+use Magento\Quote\Model\Quote;
 
 class CreateCheckoutSession
 {
@@ -83,8 +84,6 @@ class CreateCheckoutSession
 
         $orderId = $quote->getReservedOrderId();
 
-        $this->logger->debugRequest($this, $orderId);
-
         $quote->collectTotals();
 
         $this->quoteRepository->save($quote);
@@ -127,7 +126,7 @@ class CreateCheckoutSession
             'shopLogo'              => $this->getLogoSrc(),
         ]);
 
-        $responseData = $this->apiHelper->requestApi($this, 'checkout/session/create', $data, $orderId,
+        $responseData = $this->apiHelper->requestApi('CreateCheckoutSession', 'checkout/session/create', $data, $orderId,
             function ($exception) use ($quote) {
                 $this->errorResolver->tryResolveException($quote, $exception);
             }
