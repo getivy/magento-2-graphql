@@ -13,6 +13,7 @@ use Esparksinc\IvyPaymentGraphql\Model\Logger;
 use Magento\Framework\App\Config\ScopeConfigInterface;
 use Magento\Framework\Controller\Result\JsonFactory;
 use Magento\Framework\Controller\Result\RedirectFactory;
+use Magento\Framework\UrlInterface;
 use Magento\Quote\Api\CartRepositoryInterface;
 use Magento\Quote\Model\Cart\CartTotalRepository;
 use Magento\Theme\Block\Html\Header\Logo;
@@ -30,6 +31,7 @@ class CreateCheckoutSession
     protected $errorResolver;
     protected $apiHelper;
     protected $discountHelper;
+    protected $_url;
 
     /**
      * @param CartRepositoryInterface $quoteRepository
@@ -42,6 +44,7 @@ class CreateCheckoutSession
      * @param ErrorResolver $errorResolver
      * @param ApiHelper $apiHelper
      * @param DiscountHelper $discountHelper
+     * @param UrlInterface $url
      */
     public function __construct(
         CartRepositoryInterface $quoteRepository,
@@ -53,7 +56,8 @@ class CreateCheckoutSession
         Logger                  $logger,
         ErrorResolver           $errorResolver,
         ApiHelper               $apiHelper,
-        DiscountHelper          $discountHelper
+        DiscountHelper          $discountHelper,
+        UrlInterface            $url
     ) {
         $this->quoteRepository = $quoteRepository;
         $this->scopeConfig = $scopeConfig;
@@ -65,6 +69,7 @@ class CreateCheckoutSession
         $this->errorResolver = $errorResolver;
         $this->apiHelper = $apiHelper;
         $this->discountHelper = $discountHelper;
+        $this->_url = $url;
     }
 
     /**
@@ -247,7 +252,7 @@ class CreateCheckoutSession
     }
 
     private function getPluginVersion(): string {
-        $composerJson = json_decode(file_get_contents(__DIR__ . '/../../composer.json'), true);
-        return 'm2-'.$composerJson['version'];
+        $composerJson = json_decode(file_get_contents(__DIR__ . '/../../../composer.json'), true);
+        return 'm2-graphql-'.$composerJson['version'];
     }
 }
