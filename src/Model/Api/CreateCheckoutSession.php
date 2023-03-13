@@ -4,202 +4,251 @@ declare(strict_types=1);
 
 namespace Esparksinc\IvyPaymentGraphql\Model\Api;
 
+use Esparksinc\IvyPayment\Helper\Api as ApiHelper;
+use Esparksinc\IvyPayment\Helper\Discount as DiscountHelper;
 use Esparksinc\IvyPayment\Model\Config;
+use Esparksinc\IvyPayment\Model\Logger;
+use Esparksinc\IvyPayment\Model\ErrorResolver;
 use Esparksinc\IvyPayment\Model\IvyFactory;
-use GuzzleHttp\Client;
-use Magento\Framework\Serialize\Serializer\Json;
+use Magento\Framework\App\Config\ScopeConfigInterface;
+use Magento\Framework\Controller\Result\JsonFactory;
+use Magento\Framework\Controller\Result\RedirectFactory;
 use Magento\Quote\Api\CartRepositoryInterface;
 use Magento\Quote\Model\Cart\CartTotalRepository;
-use Magento\Quote\Model\Quote;
-use Psr\Http\Message\ResponseInterface;
+use Magento\Theme\Block\Html\Header\Logo;
 
 class CreateCheckoutSession
 {
-    /**
-     * @var CartRepositoryInterface
-     */
     protected $quoteRepository;
-
-    /**
-     * @var Config
-     */
+    protected $scopeConfig;
+    protected $logo;
     protected $config;
-
-    /**
-     * @var Json
-     */
-    protected $json;
-
-    /**
-     * @var IvyFactory
-     */
-    protected $ivyFactory;
-
-    /**
-     * @var CartTotalRepository
-     */
+    protected $ivy;
     protected $cartTotalRepository;
+    protected $logger;
+    protected $errorResolver;
+    protected $apiHelper;
+    protected $discountHelper;
 
+    /**
+     * @param CartRepositoryInterface $quoteRepository
+     * @param ScopeConfigInterface $scopeConfig
+     * @param Logo $logo
+     * @param Config $config
+     * @param IvyFactory $ivy
+     * @param CartTotalRepository $cartTotalRepository
+     * @param Logger $logger
+     * @param ErrorResolver $errorResolver
+     * @param ApiHelper $apiHelper
+     * @param DiscountHelper $discountHelper
+     */
     public function __construct(
         CartRepositoryInterface $quoteRepository,
-        Json $json,
-        Config $config,
-        IvyFactory $ivyFactory,
-        CartTotalRepository $cartTotalRepository
+        ScopeConfigInterface    $scopeConfig,
+        Logo                    $logo,
+        Config                  $config,
+        IvyFactory              $ivy,
+        CartTotalRepository     $cartTotalRepository,
+        Logger                  $logger,
+        ErrorResolver           $errorResolver,
+        ApiHelper               $apiHelper,
+        DiscountHelper          $discountHelper
     ) {
         $this->quoteRepository = $quoteRepository;
-        $this->json = $json;
+        $this->scopeConfig = $scopeConfig;
+        $this->logo = $logo;
         $this->config = $config;
-        $this->ivyFactory = $ivyFactory;
+        $this->ivy = $ivy;
         $this->cartTotalRepository = $cartTotalRepository;
+        $this->logger = $logger;
+        $this->errorResolver = $errorResolver;
+        $this->apiHelper = $apiHelper;
+        $this->discountHelper = $discountHelper;
     }
 
     /**
      * @param Quote $quote
-     * @param bool $isExpress
+     * @param bool $express
      * @return ResponseInterface
      * @throws \GuzzleHttp\Exception\GuzzleException
      */
-    public function execute(Quote $quote, bool $isExpress = false): ResponseInterface
+    public function execute(Quote $quote, bool $express = false): ResponseInterface
     {
-        $ivyModel = $this->ivyFactory->create();
+        $ivyModel = $this->ivy->create();
 
         if (!$quote->getReservedOrderId()) {
             $quote->reserveOrderId();
+            $ivyModel->setMagentoOrderId($quote->getReservedOrderId());
         }
+
+        $orderId = $quote->getReservedOrderId();
+
+        $this->logger->debugRequest($this, $orderId);
+
+        $quote->collectTotals();
 
         $this->quoteRepository->save($quote);
-        $orderId = $quote->getReservedOrderId();
-        $ivyModel->setMagentoOrderId($orderId);
 
-        //Price
-        $price = $this->getPrice($quote);
-
-        // Line Items
-        $ivyLineItems = $this->getLineItems($quote);
-
-        // Shipping Methods
-        $shippingMethod = $this->getShippingMethod($quote);
-
-        //billingAddress
-        $billingAddress = $this->getBillingAddress($quote);
-
-        $mcc = $this->config->getMcc();
-
-        if ($isExpress) {
+        if($express) {
             $phone = ['phone' => true];
             $data = [
-                'express'     => true,
-                'referenceId' => $orderId,
-                'category'    => $mcc,
-                'price'       => $price,
-                'lineItems'   => $ivyLineItems,
-                'required'    => $phone
+                'express' => true,
+                'required' => $phone,
             ];
         } else {
-            $prefill = ["email" => $quote->getCustomerEmail()];
+            $prefill = ["email" => $quote->getBillingAddress()->getEmail()];
+            $shippingMethods = $quote->isVirtual() ? [] : $this->getShippingMethod($quote);
+            $billingAddress = $this->getBillingAddress($quote);
+
             $data = [
-                'handshake'       => true,
-                'referenceId'     => $orderId,
-                'category'        => $mcc,
-                'price'           => $price,
-                'lineItems'       => $ivyLineItems,
-                'shippingMethods' => [$shippingMethod],
-                'billingAddress'  => $billingAddress,
-                'prefill'         => $prefill,
+                'handshake' => true,
+                'shippingMethods' => $shippingMethods,
+                'billingAddress' => $billingAddress,
+                'prefill' => $prefill,
             ];
         }
 
-        $jsonContent = $this->json->serialize($data);
+        $data = array_merge($data, [
+            'referenceId'           => $orderId,
+            'category'              => $this->config->getMcc(),
+            'price'                 => $this->getPrice($quote, $express),
+            'lineItems'             => $this->getLineItems($quote),
+            'plugin'                => $this->getPluginVersion(),
 
-        $headers['content-type'] = 'application/json';
-        $options = [
-            'headers' => $headers,
-            'body' => $jsonContent,
-        ];
-
-        $client = new Client([
-            'base_uri' => $this->config->getApiUrl(),
-            'headers' => [
-                'X-Ivy-Api-Key' => $this->config->getApiKey(),
+            "metadata"              => [
+                'quote_id'          => $quote->getId()
             ],
+
+            'successCallbackUrl'    => $this->_url->getUrl('ivypayment/success'),
+            'errorCallbackUrl'      => $this->_url->getUrl('ivypayment/fail'),
+            'quoteCallbackUrl'      => $this->_url->getUrl('ivypayment/quote'),
+            'webhookUrl'            => $this->_url->getUrl('ivypayment/webhook'),
+            'completeCallbackUrl'   => $this->_url->getUrl('ivypayment/order/complete'),
+            'shopLogo'              => $this->getLogoSrc(),
         ]);
 
-        $response = $client->post('checkout/session/create', $options);
+        $responseData = $this->apiHelper->requestApi($this, 'checkout/session/create', $data, $orderId,
+            function ($exception) use ($quote) {
+                $this->errorResolver->tryResolveException($quote, $exception);
+            }
+        );
 
-        if ($response->getStatusCode() === 200) {
-            $arrData = $this->json->unserialize((string)$response->getBody());
-
-            $ivyModel->setIvyCheckoutSession($arrData['id']);
-            $ivyModel->setIvyRedirectUrl($arrData['redirectUrl']);
+        if ($responseData) {
+            $ivyModel->setIvyCheckoutSession($responseData['id']);
+            $ivyModel->setIvyRedirectUrl($responseData['redirectUrl']);
             $ivyModel->save();
         }
 
-        return $response;
+        return $responseData;
     }
 
-    private function getLineItems($quote): array
+    private function getLineItems($quote)
     {
-        $ivyLineItems = [];
+        $ivyLineItems = array();
         foreach ($quote->getAllVisibleItems() as $lineItem) {
-            $lineItem = [
-                'name'        => $lineItem->getName(),
-                'referenceId' => $lineItem->getSku(),
-                'singleNet'   => $lineItem->getBasePrice(),
-                'singleVat'   => $lineItem->getBaseTaxAmount()?:0,
-                'amount'      => $lineItem->getBaseRowTotalInclTax()?:0,
-                'quantity'    => $lineItem->getQty(),
-                'image'       => '',
+            $ivyLineItems[] = [
+                'name'          => $lineItem->getName(),
+                'referenceId'   => $lineItem->getSku(),
+                'singleNet'     => $lineItem->getBasePrice(),
+                'singleVat'     => $lineItem->getBaseTaxAmount() ?: 0,
+                'amount'        => $lineItem->getBaseRowTotalInclTax() ?: 0,
+                'quantity'      => $lineItem->getQty(),
+                'image'         => '',
             ];
-
-            $ivyLineItems[] = $lineItem;
         }
 
-        $totals = $this->cartTotalRepository->get($quote->getId());
-        $discountAmount = $totals->getDiscountAmount();
-        if ($discountAmount < 0) {
-            $lineItem = [
+        $discountAmount = $this->discountHelper->getDiscountAmount($quote);
+        if ($discountAmount !== 0.0) {
+            $discountAmount = -1 * abs($discountAmount);
+            $ivyLineItems[] = [
                 'name'      => 'Discount',
                 'singleNet' => $discountAmount,
                 'singleVat' => 0,
                 'amount'    => $discountAmount
             ];
-
-            $ivyLineItems[] = $lineItem;
         }
 
         return $ivyLineItems;
     }
 
-    private function getPrice($quote): array
+    private function getPrice($quote, $express)
     {
+        $totals = $this->cartTotalRepository->get($quote->getId());
+
+        $shippingNet = $totals->getBaseShippingAmount();
+        $shippingVat = $totals->getBaseShippingTaxAmount();
+        $shippingTotal = $shippingNet + $shippingVat;
+
+        $total = $totals->getBaseGrandTotal();
+        $vat = $totals->getBaseTaxAmount();
+
+        $totalNet = $total - $vat;
+
+        $currency = $quote->getBaseCurrencyCode();
+
+        if ($express) {
+            $total -= $shippingTotal;
+            $vat -= $shippingVat;
+            $totalNet -= $shippingNet;
+            $shippingTotal = 0;
+            $shippingVat = 0;
+            $shippingNet = 0;
+        }
+
         return [
-            'totalNet' => $quote->getBaseSubtotal()?:0,
-            'vat'      => $quote->getShippingAddress()->getBaseTaxAmount()?:0,
-            'shipping' => $quote->getBaseShippingAmount()?:0,
-            'total'    => $quote->getBaseGrandTotal()?:0,
-            'currency' => $quote->getBaseCurrencyCode(),
+            'totalNet' => $totalNet,
+            'vat' => $vat,
+            'shipping' => $shippingTotal,
+            'total' => $total,
+            'currency' => $currency,
         ];
     }
 
     private function getShippingMethod($quote): array
     {
         $countryId = $quote->getShippingAddress()->getCountryId();
-
-        return [
-            'price'     => $quote->getBaseShippingAmount()?:0,
+        $shippingMethod = array();
+        $shippingLine = [
+            'price'     => $quote->getBaseShippingAmount() ?: 0,
             'name'      => $quote->getShippingAddress()->getShippingMethod(),
             'countries' => [$countryId]
         ];
+
+        $shippingMethod[] = $shippingLine;
+
+        return $shippingMethod;
     }
 
     private function getBillingAddress($quote): array
     {
         return [
-            'line1'   => $quote->getBillingAddress()->getStreet()[0],
-            'city'    => $quote->getBillingAddress()->getCity(),
-            'zipCode' => $quote->getBillingAddress()->getPostcode(),
-            'country' => $quote->getBillingAddress()->getCountryId(),
+            'firstName' => $quote->getBillingAddress()->getFirstname(),
+            'LastName'  => $quote->getBillingAddress()->getLastname(),
+            'line1'     => $quote->getBillingAddress()->getStreet()[0],
+            'city'      => $quote->getBillingAddress()->getCity(),
+            'zipCode'   => $quote->getBillingAddress()->getPostcode(),
+            'country'   => $quote->getBillingAddress()->getCountryId(),
         ];
+    }
+
+    protected function getLogoSrc(): string
+    {
+        $path = $this->scopeConfig->getValue(
+            'payment/ivy/frontend_settings/custom_logo',
+            \Magento\Store\Model\ScopeInterface::SCOPE_STORE
+        );
+
+        if ($path) {
+            $shopLogo = $this->_url
+                    ->getBaseUrl(['_type' => \Magento\Framework\UrlInterface::URL_TYPE_MEDIA]) .'ivy/logo/'. $path;
+        } else{
+            $shopLogo = $this->logo->getLogoSrc();
+        }
+        return $shopLogo;
+    }
+
+    private function getPluginVersion(): string {
+        $composerJson = json_decode(file_get_contents(__DIR__ . '/../../composer.json'), true);
+        return 'm2-'.$composerJson['version'];
     }
 }
